@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BINARY="$(dirname "$0")/cmake-build-release/git_vanity"
+
+echo '{"prefix":"deadbeefcake","tree":"4b825dc642cb6eb9a060e54bf8d69288fbee4904","parent":"abc1234def5678901234567890abcdef12345678","author":"Test User <test@example.com> 1700000000 +0000","committer":"Test User <test@example.com> 1700000000 +0000","message":"test commit","cores_free":2}' \
+    | "$BINARY"
