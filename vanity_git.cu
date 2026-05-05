@@ -78,17 +78,18 @@ static void print_hex(const std::string &data) {
     std::cout << std::dec;
 }
 
-// Returns body prefix up to and including "nonce: "
+// Returns body prefix up to and including "<nonce_label>: "
 static std::string build_body_prefix(const std::string &tree, const std::string &parent,
                                      const std::string &author, const std::string &committer,
-                                     const std::string &message) {
+                                     const std::string &message,
+                                     const std::string &nonce_label = "nonce") {
     std::string s;
     s.reserve(128 + tree.size() + parent.size() + author.size() + committer.size() + message.size());
     s += "tree "; s += tree; s += "\n";
     if (!parent.empty()) { s += "parent "; s += parent; s += "\n"; }
     s += "author "; s += author; s += "\n";
     s += "committer "; s += committer; s += "\n\n";
-    s += message; s += "\nnonce: ";
+    s += message; s += "\n"; s += nonce_label; s += ": ";
     return s;
 }
 
@@ -241,11 +242,12 @@ int main() {
     std::string prefix      = input.value("prefix", "");
     int         pairs_count  = input.value("pairs_count", 4);
     int         repeat_count = input.value("repeat_count", 4);
-    std::string tree      = input["tree"];
-    std::string parent    = input.value("parent", "");
-    std::string author    = input["author"];
-    std::string committer = input["committer"];
-    std::string message   = input["message"];
+    std::string tree        = input["tree"];
+    std::string parent      = input.value("parent", "");
+    std::string author      = input["author"];
+    std::string committer   = input["committer"];
+    std::string message     = input["message"];
+    std::string nonce_label = input.value("nonce_label", "nonce");
 
     auto emit = [](json j) { std::cout << j.dump() << "\n" << std::flush; };
 
@@ -261,11 +263,29 @@ int main() {
         emit({{"type","info"},{"baseline_hash", sha1_hex(base_obj)},{"mode", mode}});
     }
 
-    // Build commit object template with zero-filled nonce placeholder
+    // Build commit object template with zero-filled nonce placeholder.
+    // If the 16-digit nonce would straddle a 64-byte SHA1 block boundary the
+    // GPU kernel can only see one block of dynamic data, so pad the message
+    // with trailing spaces until the nonce fits entirely within one block.
     constexpr size_t NONCE_DIGITS = 16;
-    std::string body_prefix = build_body_prefix(tree, parent, author, committer, message);
-    size_t body_size  = body_prefix.size() + NONCE_DIGITS + 1; // +1 for trailing '\n'
-    std::string hdr   = "commit " + std::to_string(body_size);
+    std::string search_message = message;
+    std::string body_prefix;
+    std::string hdr;
+    size_t nonce_offset = 0;
+    int nonce_block = 0;
+    int nonce_off_in_blk = 0;
+    while (true) {
+        body_prefix = build_body_prefix(tree, parent, author, committer, search_message, nonce_label);
+        size_t body_size = body_prefix.size() + NONCE_DIGITS + 1;
+        hdr = "commit " + std::to_string(body_size);
+        nonce_offset = hdr.size() + 1 + body_prefix.size();
+        nonce_block = (int)(nonce_offset / 64);
+        nonce_off_in_blk = (int)(nonce_offset % 64);
+        if (nonce_off_in_blk + (int)NONCE_DIGITS <= 64) break;
+        search_message += ' ';
+    }
+
+    size_t body_size  = body_prefix.size() + NONCE_DIGITS + 1;
     size_t total_size = hdr.size() + 1 + body_size;
 
     std::string commit_tmpl(total_size, '\0');
@@ -276,14 +296,6 @@ int main() {
         memcpy(p, body_prefix.data(), body_prefix.size()); p += body_prefix.size();
         memset(p, '0', NONCE_DIGITS); p += NONCE_DIGITS;
         *p = '\n';
-    }
-    const size_t nonce_offset    = hdr.size() + 1 + body_prefix.size();
-    const int    nonce_block     = (int)(nonce_offset / 64);
-    const int    nonce_off_in_blk = (int)(nonce_offset % 64);
-
-    if (nonce_off_in_blk + (int)NONCE_DIGITS > 64) {
-        emit({{"type","error"},{"message","nonce spans a SHA1 block boundary"}});
-        return 1;
     }
 
     // Precompute SHA1 state through all blocks before the nonce block (purely static data)
@@ -362,8 +374,10 @@ int main() {
     std::string win_commit = commit_tmpl;
     memcpy(&win_commit[nonce_offset], nonce_buf, NONCE_DIGITS);
     std::string win_hash = sha1_hex(win_commit);
+    std::string win_body = win_commit.substr(hdr.size() + 1); // strip "commit <size>\0"
 
-    emit({{"type","result"},{"hash", win_hash},{"nonce", nonce_buf},
+    emit({{"type","result"},{"hash", win_hash},{"nonce", nonce_buf},{"message", search_message},
+          {"body", win_body},
           {"time_s", elapsed},{"hashes_per_sec", (uint64_t)(base / elapsed)}});
 
     cudaFree(d_result);
