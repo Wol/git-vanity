@@ -3,6 +3,5 @@
     "prefix": "cafe",
     "pairs_count": 4,
     "repeat_count": 4,
-    "cores_free": 2,
     "nonce_label": "nonce"
 }

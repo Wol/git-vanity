@@ -65,7 +65,6 @@ The script is configured using a `.vanityconfig` file which specifies what mode 
     "prefix":      "cafe",
     "pairs_count": 4,
     "repeat_count": 4,
-    "cores_free":  2,
     "nonce_label": "nonce"
 }
 ```
@@ -76,7 +75,6 @@ The script is configured using a `.vanityconfig` file which specifies what mode 
 | `prefix` | Hex string to match at the start of the hash (mode: prefix)                                                                                                         |
 | `pairs_count` | Number of leading bytes to check for paired nibbles (mode: pairs)                                                                                                   |
 | `repeat_count` | Number of bytes N such that hash[0..N-1] == hash[N..2N-1] (mode: repeat)                                                                                            |
-| `cores_free` | CPU cores to leave idle (for CPU fallback only). Not currently implemented                                                                                          |
 | `nonce_label` | Label used in the commit message line, default `nonce`                                                                                                              |
 
 ## Examples
