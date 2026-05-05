@@ -27,3 +27,19 @@ target_link_libraries(git_vanity
     OpenSSL::Crypto
     nlohmann_json::nlohmann_json
 )
+
+
+add_executable(git_vanity_cpu vanity_git.cpp)
+
+target_compile_options(git_vanity_cpu PRIVATE
+        --fast-math
+        -O3
+)
+
+target_link_libraries(git_vanity_cpu
+        OpenSSL::SSL
+        OpenSSL::Crypto
+        nlohmann_json::nlohmann_json
+)
+
+
