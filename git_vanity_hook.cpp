@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <unistd.h>
+#include <climits>
 
 using json = nlohmann::json;
 
@@ -69,8 +70,20 @@ int main() {
     git_die(git_repository_open_ext(&repo, ".", GIT_REPOSITORY_OPEN_FROM_ENV, nullptr),
             "open repository");
 
-    // Load .vanityconfig from repo root
-    std::string workdir = git_repository_workdir(repo) ? git_repository_workdir(repo) : "";
+    // Load .vanityconfig from repo root.
+    // git_repository_workdir() returns NULL when the repo was opened via GIT_DIR (e.g. a
+    // submodule gitdir at .git/modules/<name>) and libgit2 cannot resolve the worktree from
+    // the config's worktree= entry.  Git always chdirs to the worktree root before running
+    // hooks, so CWD is a reliable fallback.
+    std::string workdir;
+    if (const char *wd = git_repository_workdir(repo)) {
+        workdir = wd;  // libgit2 always appends a trailing '/'
+    } else {
+        char cwd_buf[PATH_MAX];
+        if (getcwd(cwd_buf, sizeof(cwd_buf))) {
+            workdir = std::string(cwd_buf) + "/";
+        }
+    }
     std::string config_path = workdir + ".vanityconfig";
     std::ifstream cfg_file(config_path);
     if (!cfg_file.is_open()) {
