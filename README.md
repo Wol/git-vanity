@@ -134,3 +134,8 @@ Output lines:
 - `{"type":"info", "baseline_hash":"...", "mode":"..."}` — hash of commit before nonce
 - `{"type":"progress", "hashes_tried":..., "hashes_per_sec":...}` — periodic progress
 - `{"type":"result", "hash":"...", "nonce":"...", "body":"...", "time_s":..., "hashes_per_sec":...}` — match found; `body` is the raw commit object body ready to write to the ODB
+
+## Submodules
+`git_vanity_hook` will work with submodules. Place the hook in the `.git/modules/<name>/hooks/post-commit` directory, and ensure that the submodule has a suitable `.vanityconfig` file in there.
+
+`git_vanity_hook` can then be run manually in the submodule folder if you first `cd` to it.
