@@ -53,6 +53,17 @@ static std::string strip_existing_nonce_line(const std::string &message, const s
     return stripped;
 }
 
+// $XDG_CONFIG_HOME/git-vanity/config.json, or ~/.config/git-vanity/config.json if
+// XDG_CONFIG_HOME is unset/empty (per the XDG basedir spec). "" if neither
+// XDG_CONFIG_HOME nor HOME is set.
+static std::string global_config_path() {
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    if (xdg && xdg[0] != '\0') return std::string(xdg) + "/git-vanity/config.json";
+    const char *home = getenv("HOME");
+    if (home && home[0] != '\0') return std::string(home) + "/.config/git-vanity/config.json";
+    return "";
+}
+
 // Pipe JSON into git_vanity via a temp file, echo output to stderr, return the "result" line
 static json run_vanity(const json &input) {
     char tmp[] = "/tmp/git_vanity_XXXXXX";
@@ -106,13 +117,24 @@ int main() {
             workdir = std::string(cwd_buf) + "/";
         }
     }
-    std::string config_path = workdir + ".vanityconfig";
-    std::ifstream cfg_file(config_path);
-    if (!cfg_file.is_open()) {
-        std::cerr << "{\"type\":\"error\",\"message\":\"no .vanityconfig found at " << config_path << "\"}\n";
+    // A repo's own .vanityconfig takes precedence; otherwise fall back to the
+    // user's global default so most repos don't need one of their own at all.
+    std::string local_path = workdir + ".vanityconfig";
+    std::string global_path = global_config_path();
+
+    std::string config_path;
+    { std::ifstream test(local_path); if (test.is_open()) config_path = local_path; }
+    if (config_path.empty() && !global_path.empty()) {
+        std::ifstream test(global_path); if (test.is_open()) config_path = global_path;
+    }
+    if (config_path.empty()) {
+        std::cerr << "{\"type\":\"error\",\"message\":\"no .vanityconfig found at " << local_path
+                   << (global_path.empty() ? "" : " or " + global_path) << "\"}\n";
         return 1;
     }
-    // allow_exceptions=true, ignore_comments=true — .vanityconfig may contain // and /* */ comments
+
+    std::ifstream cfg_file(config_path);
+    // allow_exceptions=true, ignore_comments=true — config may contain // and /* */ comments
     json config = json::parse(cfg_file, nullptr, true, true);
 
     // Read HEAD commit — must be run post-commit so the commit exists

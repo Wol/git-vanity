@@ -1,0 +1,17 @@
+stages:
+  - build
+
+build:
+  stage: build
+  image: nvidia/cuda:12.4.1-devel-ubuntu24.04
+  before_script:
+    - apt-get update -qq
+    - apt-get install -y -qq cmake build-essential pkg-config libssl-dev libgit2-dev nlohmann-json3-dev
+  script:
+    - cmake -B build -DCMAKE_BUILD_TYPE=Release
+    - cmake --build build
+  artifacts:
+    paths:
+      - build/git_vanity
+      - build/git_vanity_hook
+    expire_in: 1 week

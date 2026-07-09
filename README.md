@@ -41,23 +41,43 @@ By default the CUDA target is compiled for SM 8.9 (Ada Lovelace / RTX 40-series)
 
 ## Install the hook
 
+Put both binaries on your `PATH` once (e.g. symlink them into `~/.local/bin`):
+
+```sh
+ln -s "$(pwd)/build/git_vanity" ~/.local/bin/git_vanity
+ln -s "$(pwd)/build/git_vanity_hook" ~/.local/bin/git_vanity_hook
+```
+
+Then, in any repo you want vanity hashes on, run the installer (copy `git-vanity-init` to a directory on your `PATH`, e.g. `~/.local/bin`, once — after that it also works as `git vanity-init`):
+
+```sh
+cp git-vanity-init ~/.local/bin/
+cd /path/to/repo
+git vanity-init
+```
+
+This symlinks the repo's `post-commit` hook to `git_vanity_hook` and makes sure a config exists (see below). Run `git vanity-init --help` for flags.
+
+Prefer to do it by hand instead:
+
 ```sh
 # In any repository you want vanity hashes on:
-cp build/git_vanity_hook /path/to/repo/.git/hooks/post-commit
-chmod +x /path/to/repo/.git/hooks/post-commit
+ln -s "$(command -v git_vanity_hook)" /path/to/repo/.git/hooks/post-commit
 
 cp .vanityconfig.example /path/to/repo/.vanityconfig
 # Edit .vanityconfig to taste (see below)
-
-# git_vanity must be on PATH
-sudo cp build/git_vanity /usr/local/bin/
 ```
 
 Now every `git commit` automatically amends HEAD to match the configured pattern.
 
 ## .vanityconfig
 
-The script is configured using a `.vanityconfig` file which specifies what mode to run in. `//` and `/* */` comments are allowed — see `.vanityconfig.example` for a fully annotated version.
+The hook is configured by a `.vanityconfig`-shaped JSON file. It checks two locations, in order:
+
+1. `.vanityconfig` in the repo's own working directory — lets a repo override the pattern.
+2. `~/.config/git-vanity/config.json` (or `$XDG_CONFIG_HOME/git-vanity/config.json` if set) — a global default shared by every repo that doesn't have its own `.vanityconfig`.
+
+`git vanity-init` sets up the global default automatically; pass `--local` to also create a per-repo `.vanityconfig`. `//` and `/* */` comments are allowed in either file — see `.vanityconfig.example` for a fully annotated version.
 
 ```json
 {
@@ -136,6 +156,10 @@ Output lines:
 - `{"type":"result", "hash":"...", "nonce":"...", "body":"...", "time_s":..., "hashes_per_sec":...}` — match found; `body` is the raw commit object body ready to write to the ODB
 
 ## Submodules
-`git_vanity_hook` will work with submodules. Place the hook in the `.git/modules/<name>/hooks/post-commit` directory, and ensure that the submodule has a suitable `.vanityconfig` file in there.
+`git_vanity_hook` will work with submodules. Place the hook itself in the `.git/modules/<name>/hooks/post-commit` directory — but `.vanityconfig` goes in the submodule's own working-directory root (i.e. `<submodule-path>/.vanityconfig`), not inside `.git/modules/`, since that's where the hook actually looks for it. `git vanity-init --local`, run from inside the submodule, puts it in the right place.
 
 `git_vanity_hook` can then be run manually in the submodule folder if you first `cd` to it.
+
+## CI
+
+`.gitlab-ci.yml` builds the project in a `nvidia/cuda` devel image (no GPU runner needed — `nvcc` can cross-compile for the configured `CUDA_ARCHITECTURES` without a physical GPU present) and publishes `git_vanity` and `git_vanity_hook` as pipeline artifacts.

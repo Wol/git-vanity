@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# Installs the git-vanity post-commit hook into the current repo and makes sure
+# a config exists for it to use. Copy this to a directory on your PATH (e.g.
+# ~/.local/bin) — once there it also works as `git vanity-init`, via git's
+# subcommand convention of finding any `git-<name>` executable on PATH.
+set -euo pipefail
+
+: "${HOME:?HOME is not set}"
+
+FORCE=0
+LOCAL=0
+for arg in "$@"; do
+    case "$arg" in
+        --force) FORCE=1 ;;
+        --local) LOCAL=1 ;;
+        -h|--help)
+            cat <<'EOF'
+Usage: git-vanity-init [--force] [--local]
+
+Installs the post-commit vanity-hash hook into the current git repo, and
+ensures a config exists for it to use (global default at
+~/.config/git-vanity/config.json unless --local is given).
+
+  --local   Also create a per-repo .vanityconfig (overrides the global default)
+  --force   Replace an existing post-commit hook that isn't already ours
+            (the old one is backed up before being replaced)
+EOF
+            exit 0
+            ;;
+        *)
+            echo "error: unknown argument '$arg' (see --help)" >&2
+            exit 1
+            ;;
+    esac
+done
+
+# --git-path resolves submodule hook directories (.git/modules/<name>/hooks)
+# just as well as a normal .git/hooks — it isn't affected by the GIT_DIR
+# resolution quirk that git_vanity_hook.cpp's libgit2 code has to work around,
+# since that quirk is specific to libgit2 opening a repo, not to `git` itself.
+HOOKS_DIR="$(git rev-parse --git-path hooks 2>/dev/null)" || {
+    echo "error: not inside a git repository" >&2
+    exit 1
+}
+WORKDIR="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "error: could not resolve repository working directory" >&2
+    exit 1
+}
+
+HOOK_BIN="$(command -v git_vanity_hook || true)"
+if [ -z "$HOOK_BIN" ]; then
+    echo "error: git_vanity_hook not found on PATH (expected in ~/.local/bin — see README)" >&2
+    exit 1
+fi
+if [ -z "$(command -v git_vanity || true)" ]; then
+    echo "error: git_vanity not found on PATH (expected in ~/.local/bin — see README)" >&2
+    exit 1
+fi
+HOOK_BIN_REAL="$(readlink -f "$HOOK_BIN")"
+
+# --- install the post-commit hook ---
+TARGET="$HOOKS_DIR/post-commit"
+if [ -L "$TARGET" ] && [ "$(readlink -f "$TARGET")" = "$HOOK_BIN_REAL" ]; then
+    echo "post-commit hook already installed -> $HOOK_BIN"
+elif [ -e "$TARGET" ] || [ -L "$TARGET" ]; then
+    if [ "$FORCE" -ne 1 ]; then
+        echo "error: $TARGET already exists and isn't the git-vanity hook (use --force to replace it)" >&2
+        exit 1
+    fi
+    BACKUP="$TARGET.bak"
+    if [ -e "$BACKUP" ]; then
+        BACKUP="$TARGET.bak.$(date +%s)"
+    fi
+    mv "$TARGET" "$BACKUP"
+    echo "backed up existing hook to $BACKUP"
+    ln -s "$HOOK_BIN" "$TARGET"
+    echo "installed post-commit hook -> $HOOK_BIN"
+else
+    ln -s "$HOOK_BIN" "$TARGET"
+    echo "installed post-commit hook -> $HOOK_BIN"
+fi
+
+# --- ensure a config exists ---
+# Prefer the real .vanityconfig.example next to this script (so edits to it
+# propagate), falling back to an embedded copy so the script still works once
+# copied standalone to ~/.local/bin. Keep the two in sync if you edit either.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEMPLATE="$SCRIPT_DIR/.vanityconfig.example"
+
+write_template() {
+    local dest="$1"
+    if [ -f "$TEMPLATE" ]; then
+        cp "$TEMPLATE" "$dest"
+        return
+    fi
+    cat > "$dest" <<'EOF'
+{
+    // Which matching mode to use: "prefix", "pairs", or "repeat".
+    // Only the field(s) relevant to the chosen mode are used; the others are ignored.
+    "mode": "prefix",
+
+    // mode "prefix": commit hash must start with this hex string, e.g. "cafe", "dead", "c0ffee".
+    "prefix": "cafe",
+
+    // mode "pairs": number of leading hash bytes that must each have matching nibbles
+    // (e.g. 0xAA, 0xBB, 0x11 — high nibble == low nibble).
+    "pairs_count": 4,
+
+    // mode "repeat": N such that hash[0..N-1] == hash[N..2N-1], i.e. the first N bytes
+    // are repeated immediately after themselves.
+    "repeat_count": 4,
+
+    // Label used for the trailer line appended to the commit message, e.g.
+    // "nonce" -> "nonce: 0000000000012345". Set to "Co-authored-by" to have the
+    // nonce ride along as a co-author trailer instead. Optional, defaults to "nonce".
+    "nonce_label": "nonce"
+}
+EOF
+}
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/git-vanity"
+GLOBAL_CONFIG="$CONFIG_DIR/config.json"
+if [ -f "$GLOBAL_CONFIG" ]; then
+    echo "global config already exists at $GLOBAL_CONFIG"
+else
+    mkdir -p "$CONFIG_DIR"
+    write_template "$GLOBAL_CONFIG"
+    echo "created global default config at $GLOBAL_CONFIG"
+fi
+
+if [ "$LOCAL" -eq 1 ]; then
+    LOCAL_CONFIG="$WORKDIR/.vanityconfig"
+    if [ -f "$LOCAL_CONFIG" ]; then
+        echo "repo already has its own config at $LOCAL_CONFIG"
+    else
+        write_template "$LOCAL_CONFIG"
+        echo "created per-repo config at $LOCAL_CONFIG (overrides the global default)"
+    fi
+fi
