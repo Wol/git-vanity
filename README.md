@@ -57,7 +57,7 @@ Now every `git commit` automatically amends HEAD to match the configured pattern
 
 ## .vanityconfig
 
-The script is configured using a `.vanityconfig` file which specifies what mode to run in.
+The script is configured using a `.vanityconfig` file which specifies what mode to run in. `//` and `/* */` comments are allowed — see `.vanityconfig.example` for a fully annotated version.
 
 ```json
 {

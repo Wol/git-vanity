@@ -79,14 +79,16 @@ static void print_hex(const std::string &data) {
 }
 
 // Returns body prefix up to and including "<nonce_label>: "
-static std::string build_body_prefix(const std::string &tree, const std::string &parent,
+// `parents` is a pre-formatted block of zero or more "parent <sha>\n" lines
+// (a merge commit has two or more), so it can be appended verbatim.
+static std::string build_body_prefix(const std::string &tree, const std::string &parents,
                                      const std::string &author, const std::string &committer,
                                      const std::string &message,
                                      const std::string &nonce_label = "nonce") {
     std::string s;
-    s.reserve(128 + tree.size() + parent.size() + author.size() + committer.size() + message.size());
+    s.reserve(128 + tree.size() + parents.size() + author.size() + committer.size() + message.size());
     s += "tree "; s += tree; s += "\n";
-    if (!parent.empty()) { s += "parent "; s += parent; s += "\n"; }
+    s += parents;
     s += "author "; s += author; s += "\n";
     s += "committer "; s += committer; s += "\n\n";
     s += message; s += "\n"; s += nonce_label; s += ": ";
@@ -243,11 +245,24 @@ int main() {
     int         pairs_count  = input.value("pairs_count", 4);
     int         repeat_count = input.value("repeat_count", 4);
     std::string tree        = input["tree"];
-    std::string parent      = input.value("parent", "");
     std::string author      = input["author"];
     std::string committer   = input["committer"];
     std::string message     = input["message"];
     std::string nonce_label = input.value("nonce_label", "nonce");
+
+    // Collect parents into a pre-formatted "parent <sha>\n" block. A merge
+    // commit has two or more; accept either a "parents" array or a single
+    // "parent" string for backward compatibility.
+    std::string parents;
+    if (input.contains("parents") && input["parents"].is_array()) {
+        for (const auto &p : input["parents"]) {
+            std::string sha = p.get<std::string>();
+            if (!sha.empty()) { parents += "parent "; parents += sha; parents += "\n"; }
+        }
+    } else {
+        std::string parent = input.value("parent", "");
+        if (!parent.empty()) { parents += "parent "; parents += parent; parents += "\n"; }
+    }
 
     auto emit = [](json j) { std::cout << j.dump() << "\n" << std::flush; };
 
@@ -255,7 +270,7 @@ int main() {
     {
         std::string body;
         body += "tree "; body += tree; body += "\n";
-        if (!parent.empty()) { body += "parent "; body += parent; body += "\n"; }
+        body += parents;
         body += "author "; body += author; body += "\n";
         body += "committer "; body += committer; body += "\n\n";
         body += message; body += "\n";
@@ -275,7 +290,7 @@ int main() {
     int nonce_block = 0;
     int nonce_off_in_blk = 0;
     while (true) {
-        body_prefix = build_body_prefix(tree, parent, author, committer, search_message, nonce_label);
+        body_prefix = build_body_prefix(tree, parents, author, committer, search_message, nonce_label);
         size_t body_size = body_prefix.size() + NONCE_DIGITS + 1;
         hdr = "commit " + std::to_string(body_size);
         nonce_offset = hdr.size() + 1 + body_prefix.size();

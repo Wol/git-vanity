@@ -10,6 +10,7 @@
 #include <cstring>
 #include <unistd.h>
 #include <climits>
+#include <cctype>
 
 using json = nlohmann::json;
 
@@ -29,6 +30,27 @@ static std::string format_sig(const git_signature *s) {
     snprintf(tz, sizeof(tz), "%+03d%02d", off / 60, std::abs(off % 60));
     return std::string(s->name) + " <" + s->email + "> "
            + std::to_string((long long)s->when.time) + " " + tz;
+}
+
+// If `message` already ends with a trailer of the form "\n<label>: <digits>",
+// it's a nonce line from a previous vanity pass (e.g. before this commit was
+// rebased) rather than a genuine trailer — strip it so we replace the nonce
+// in place instead of stacking a second one. A real "Co-authored-by:" line
+// has a "Name <email>" value, never a bare digit string, so this can't
+// mistake a real trailer for our own.
+static std::string strip_existing_nonce_line(const std::string &message, const std::string &label) {
+    std::string marker = "\n" + label + ": ";
+    size_t pos = message.rfind(marker);
+    if (pos == std::string::npos) return message;
+
+    size_t digits_start = pos + marker.size();
+    if (digits_start >= message.size()) return message;
+    for (size_t i = digits_start; i < message.size(); ++i)
+        if (!std::isdigit(static_cast<unsigned char>(message[i]))) return message;
+
+    std::string stripped = message.substr(0, pos);
+    while (!stripped.empty() && stripped.back() == ' ') stripped.pop_back();
+    return stripped;
 }
 
 // Pipe JSON into git_vanity via a temp file, echo output to stderr, return the "result" line
@@ -90,8 +112,8 @@ int main() {
         std::cerr << "{\"type\":\"error\",\"message\":\"no .vanityconfig found at " << config_path << "\"}\n";
         return 1;
     }
-    json config;
-    cfg_file >> config;
+    // allow_exceptions=true, ignore_comments=true — .vanityconfig may contain // and /* */ comments
+    json config = json::parse(cfg_file, nullptr, true, true);
 
     // Read HEAD commit — must be run post-commit so the commit exists
     git_reference *head_ref = nullptr;
@@ -106,16 +128,24 @@ int main() {
     char tree_sha[GIT_OID_HEXSZ + 1];
     git_oid_tostr(tree_sha, sizeof(tree_sha), git_commit_tree_id(commit));
 
-    std::string parent_sha;
-    if (git_commit_parentcount(commit) > 0) {
+    // Collect every parent — a merge commit has two or more, and dropping any
+    // of them would rewrite the merge into an ordinary single-parent commit.
+    std::vector<std::string> parents;
+    unsigned int parent_count = git_commit_parentcount(commit);
+    for (unsigned int i = 0; i < parent_count; ++i) {
         char buf[GIT_OID_HEXSZ + 1];
-        git_oid_tostr(buf, sizeof(buf), git_commit_parent_id(commit, 0));
-        parent_sha = buf;
+        git_oid_tostr(buf, sizeof(buf), git_commit_parent_id(commit, i));
+        parents.emplace_back(buf);
     }
 
     // Strip trailing newlines from message
     std::string message = git_commit_message(commit);
     while (!message.empty() && message.back() == '\n') message.pop_back();
+
+    // Drop any nonce trailer left over from a previous vanity pass (e.g. this
+    // commit got rebased) so we overwrite it instead of adding a second one.
+    std::string nonce_label = config.value("nonce_label", "nonce");
+    message = strip_existing_nonce_line(message, nonce_label);
 
     // Build input for git_vanity, merging .vanityconfig fields
     json input = config;
@@ -123,7 +153,7 @@ int main() {
     input["author"]    = format_sig(author);
     input["committer"] = format_sig(committer);
     input["message"]   = message;
-    if (!parent_sha.empty()) input["parent"] = parent_sha;
+    if (!parents.empty()) input["parents"] = parents;
 
     json result = run_vanity(input);
     std::string nonce = result["nonce"];

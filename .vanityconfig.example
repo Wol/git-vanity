@@ -1,7 +1,21 @@
 {
+    // Which matching mode to use: "prefix", "pairs", or "repeat".
+    // Only the field(s) relevant to the chosen mode are used; the others are ignored.
     "mode": "prefix",
+
+    // mode "prefix": commit hash must start with this hex string, e.g. "cafe", "dead", "c0ffee".
     "prefix": "cafe",
+
+    // mode "pairs": number of leading hash bytes that must each have matching nibbles
+    // (e.g. 0xAA, 0xBB, 0x11 — high nibble == low nibble).
     "pairs_count": 4,
+
+    // mode "repeat": N such that hash[0..N-1] == hash[N..2N-1], i.e. the first N bytes
+    // are repeated immediately after themselves.
     "repeat_count": 4,
+
+    // Label used for the trailer line appended to the commit message, e.g.
+    // "nonce" -> "nonce: 0000000000012345". Set to "Co-authored-by" to have the
+    // nonce ride along as a co-author trailer instead. Optional, defaults to "nonce".
     "nonce_label": "nonce"
 }
